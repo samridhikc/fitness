@@ -1,0 +1,5 @@
+const express = require('express'); const WeightLog = require('../models/WeightLog'); const auth = require('../middleware/auth'); const router = express.Router();
+router.post('/log', auth, async (req, res) => { try { const { weight, date, note } = req.body; const log = new WeightLog({ userId: req.user.id, weight, date: date || new Date(), note: note || '' }); await log.save(); const User = require('../models/User'); await User.findByIdAndUpdate(req.user.id, { weight }); res.json(log); } catch (error) { res.status(500).json({ message: error.message }); } });
+router.get('/history', auth, async (req, res) => { try { const logs = await WeightLog.find({ userId: req.user.id }).sort({ date: 1 }).limit(90); res.json(logs); } catch (error) { res.status(500).json({ message: error.message }); } });
+router.delete('/:id', auth, async (req, res) => { try { const log = await WeightLog.findOne({ _id: req.params.id, userId: req.user.id }); if (!log) return res.status(404).json({ message: 'Entry not found' }); await log.deleteOne(); res.json({ message: 'Entry deleted' }); } catch (error) { res.status(500).json({ message: error.message }); } });
+module.exports = router;
