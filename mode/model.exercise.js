@@ -1,0 +1,3 @@
+const mongoose = require('mongoose');
+const exerciseSchema = new mongoose.Schema({ name: { type: String, required: true }, description: { type: String, required: true }, targetMuscle: { type: String, required: true }, difficulty: { type: String, enum: ['beginner', 'intermediate', 'advanced'], required: true }, type: { type: String, enum: ['strength', 'cardio', 'flexibility'], required: true }, goal: { type: String, enum: ['lose', 'maintain', 'gain', 'all'], required: true }, duration: { type: Number, required: true }, caloriesBurned: { type: Number, required: true }, steps: [{ type: String }], image: { type: String, default: '' } }, { timestamps: true });
+module.exports = mongoose.model('Exercise', exerciseSchema);
