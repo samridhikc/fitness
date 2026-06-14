@@ -1,0 +1,4 @@
+const express = require('express'); const Exercise = require('../models/Exercise'); const auth = require('../middleware/auth'); const router = express.Router();
+router.get('/', auth, async (req, res) => { try { const { goal, difficulty, type, search } = req.query; const filter = {}; if (goal) filter.goal = { $in: [goal, 'all'] }; if (difficulty) filter.difficulty = difficulty; if (type) filter.type = type; if (search) filter.name = { $regex: search, $options: 'i' }; const exercises = await Exercise.find(filter).sort({ name: 1 }); res.json(exercises); } catch (error) { res.status(500).json({ message: error.message }); } });
+router.get('/:id', auth, async (req, res) => { try { const exercise = await Exercise.findById(req.params.id); if (!exercise) return res.status(404).json({ message: 'Exercise not found' }); res.json(exercise); } catch (error) { res.status(500).json({ message: error.message }); } });
+module.exports = router;
