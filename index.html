@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fitness Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
+            accent: { 400:'#fb923c',500:'#f97316',600:'#ea580c' }
+          },
+          fontFamily: { sans: ['Inter','sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    ::selection { background: #059669; color: #fff; }
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .card-hover { transition: all 0.3s ease; }
+    .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 24px -8px rgba(0,0,0,0.12); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="app"></div>
+
+  <script>
+    const state = { token: localStorage.getItem('fh_token'), user: JSON.parse(localStorage.getItem('fh_user') || 'null'), page: 'dashboard', data: {}, activeChatId: null };
+    const API = 'http://localhost:5000/api';
+
+    async function api(endpoint, method = 'GET', body = null) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+      try {
+        const res = await fetch(`${API}${endpoint}`, { method, headers, body: body ? JSON.stringify(body) : null });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'API Error');
+        return data;
+      } catch (err) { showToast(err.message, 'error'); throw err; }
+    }
+
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      const bg = type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-blue-600' : 'bg-brand-600';
+      const icon = type === 'error' ? 'x-circle' : type === 'info' ? 'info' : 'check-circle';
+      toast.className = `fixed top-6 right-6 z-[9999] ${bg} text-white px-6 py-3.5 rounded-xl shadow-2xl fade-in flex items-center gap-3`;
+      toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span class="text-sm font-medium">${message}</span>`;
+      document.body.appendChild(toast);
+      lucide.createIcons({ nodes: [toast] });
+      setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity 0.3s'; setTimeout(()=>toast.remove(),300); }, 3000);
+    }
+
+    function setAuth(token, user) { state.token = token; state.user = user; localStorage.setItem('fh_token', token); localStorage.setItem('fh_user', JSON.stringify(user)); }
+    function logout() { state.token = null; state.user = null; state.page = 'dashboard'; state.data = {}; state.activeChatId = null; localStorage.removeItem('fh_token'); localStorage.removeItem('fh_user'); render(); }
+    function navigate(page) { state.page = page; render(); }
+
+    function render() {
+      const app = document.getElementById('app');
+      if (!state.token) { app.innerHTML = renderAuth(); } else { app.innerHTML = renderApp(); }
+      lucide.createIcons();
+    }
+
+    // ========================================
+    // AUTH
+    // ========================================
+    function renderAuth() {
+      return `
+      <div class="min-h-screen flex bg-white">
+        <div class="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-brand-700 via-brand-800 to-brand-900 text-white flex-col justify-between p-12 relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-full opacity-10" style="background-image: radial-gradient(#ffffff 1px, transparent 1px); background-size: 20px 20px;"></div>
+          <div class="relative z-10"><div class="flex items-center gap-3 mb-2"><div class="w-12 h-12 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/20"><i data-lucide="dumbbell" class="w-7 h-7 text-brand-200"></i></div><span class="text-2xl font-bold tracking-tight">Fitness Hub</span></div></div>
+          <div class="relative z-10 space-y-8"><h2 class="text-5xl font-extrabold leading-tight tracking-tight">Transform your body.<br><span class="text-brand-300">Transform your life.</span></h2></div>
+          <div class="relative z-10 text-brand-400 text-xs">© 2025 Fitness Hub</div>
+        </div>
+        <div class="w-full lg:w-1/2 flex items-center justify-center p-8 bg-slate-50">
+          <div class="max-w-md w-full fade-in">
+            <h2 class="text-3xl font-bold text-slate-900 mb-1">Welcome back</h2><p class="text-slate-500 mb-8">Sign in or create an account</p>
+            <div class="flex bg-slate-200/70 rounded-lg p-1 mb-8">
+              <button onclick="switchAuthTab('login')" id="tab-login" class="flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm">Sign In</button>
+              <button onclick="switchAuthTab('register')" id="tab-register" class="flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500">Sign Up</button>
+            </div>
+            <form id="login-form" onsubmit="handleLogin(event)" class="space-y-5">
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label><input type="email" id="login-email" required placeholder="you@example.com" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Password</label><input type="password" id="login-password" required placeholder="Enter password" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-3.5 rounded-lg font-semibold shadow-md">Sign In</button>
+            </form>
+            <form id="register-form" class="hidden" onsubmit="handleRegister(event)">
+              <div class="space-y-5">
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label><input type="text" id="reg-name" required placeholder="John Doe" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label><input type="email" id="reg-email" required placeholder="you@example.com" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Password</label><input type="password" id="reg-password" required minlength="6" placeholder="Min 6 characters" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">I am a...</label><select id="reg-role" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><option value="customer">Customer (Track my fitness)</option><option value="trainer">Trainer (Coach clients)</option></select></div>
+                <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-3.5 rounded-lg font-semibold shadow-md">Create Account</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>`;
+    }
+    function switchAuthTab(tab) { const lf = document.getElementById('login-form'); const rf = document.getElementById('register-form'); const tl = document.getElementById('tab-login'); const tr = document.getElementById('tab-register'); if (tab === 'login') { lf.classList.remove('hidden'); rf.classList.add('hidden'); tl.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm'; tr.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500'; } else { lf.classList.add('hidden'); rf.classList.remove('hidden'); tr.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm'; tl.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500'; } }
+    async function handleLogin(e) { e.preventDefault(); try { const data = await api('/auth/login', 'POST', { email: document.getElementById('login-email').value, password: document.getElementById('login-password').value }); setAuth(data.token, data.user); showToast('Welcome back!'); render(); } catch(err){} }
+    async function handleRegister(e) { e.preventDefault(); try { const data = await api('/auth/register', 'POST', { name: document.getElementById('reg-name').value, email: document.getElementById('reg-email').value, password: document.getElementById('reg-password').value, role: document.getElementById('reg-role').value }); setAuth(data.token, data.user); showToast('Account created!'); render(); } catch(err){} }
+
+    // ========================================
+    // APP LAYOUT
+    // ========================================
+    function renderApp() {
+      const isTrainer = state.user?.role === 'trainer';
+      const customerMenu = [ {id:'dashboard', icon:'layout-dashboard', label:'Dashboard'}, {id:'profile', icon:'user-circle', label:'Profile'}, {id:'calories', icon:'flame', label:'Calories'}, {id:'weight', icon:'trending-down', label:'Weight'}, {id:'exercises', icon:'dumbbell', label:'Exercises'}, {id:'subscription', icon:'crown', label:'Subscription'}, {id:'trainer', icon:'message-circle', label:'Trainer Chat'} ];
+      const trainerMenu = [ {id:'dashboard', icon:'layout-dashboard', label:'Dashboard'}, {id:'chat', icon:'message-circle', label:'Messages'}, {id:'profile', icon:'user-circle', label:'My Profile'} ];
+      const menuItems = isTrainer ? trainerMenu : customerMenu;
+      const title = isTrainer ? 'Trainer Hub' : 'Fitness Hub';
+      const icon = isTrainer ? 'shield' : 'dumbbell';
+      return `<div class="flex min-h-screen bg-slate-50"><aside class="hidden lg:flex flex-col w-72 bg-white border-r border-slate-100 fixed h-full z-40"><div class="p-6 border-b border-slate-100"><div class="flex items-center gap-3"><div class="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-md"><i data-lucide="${icon}" class="w-5 h-5 text-white"></i></div><span class="text-xl font-bold text-slate-900 tracking-tight">${title}</span></div></div><nav class="flex-1 p-4 space-y-1.5">${menuItems.map(item => `<button onclick="navigate('${item.id}')" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${state.page===item.id ? 'bg-brand-50 text-brand-700 font-semibold border-l-4 border-brand-600' : 'text-slate-500 hover:bg-slate-50 border-l-4 border-transparent'}"><i data-lucide="${item.icon}" class="w-5 h-5"></i>${item.label}</button>`).join('')}</nav><div class="p-4 border-t border-slate-100"><div class="flex items-center gap-3 px-4 py-2"><div class="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center border-2 border-white shadow-sm"><span class="text-brand-700 text-sm font-bold">${(state.user?.name||'U')[0].toUpperCase()}</span></div><div class="flex-1 min-w-0"><p class="text-sm font-semibold text-slate-900 truncate">${state.user?.name||'User'}</p><p class="text-xs text-slate-400 truncate capitalize">${state.user?.role||'Customer'} • ${state.user?.subscription?.plan || 'Free'}</p></div><button onclick="logout()" class="text-slate-300 hover:text-red-500 transition-colors p-1"><i data-lucide="log-out" class="w-5 h-5"></i></button></div></div></aside><nav class="lg:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 z-50 px-2 py-1"><div class="flex justify-around">${menuItems.slice(0,5).map(item=>`<button onclick="navigate('${item.id}')" class="flex flex-col items-center py-2 px-2 rounded-lg transition-all ${state.page===item.id?'text-brand-600':'text-slate-400'}"><i data-lucide="${item.icon}" class="w-5 h-5"></i><span class="text-[10px] mt-0.5 font-medium">${item.label.split(' ')[0]}</span></button>`).join('')}</div></nav><main class="flex-1 lg:ml-72 pb-20 lg:pb-0"><div class="max-w-7xl mx-auto p-6 sm:p-8 lg:p-10"><div class="fade-in" id="page-content">${renderPage()}</div></div></main></div>`;
+    }
+
+    function renderPage() {
+      const isTrainer = state.user?.role === 'trainer';
+      if (isTrainer) { switch(state.page) { case 'profile': return renderProfile(); case 'chat': loadChatPartners(); return renderRealChat(); default: return renderTrainerDashboard(); } } 
+      else { switch(state.page) { case 'profile': return renderProfile(); case 'calories': return renderCalories(); case 'weight': return renderWeight(); case 'exercises': return renderExercises(); case 'subscription': return renderSubscription(); case 'trainer': loadChatPartners(); return renderRealChat(); default: return renderDashboard(); } }
+    }
+
+    // ========================================
+    // DASHBOARDS
+    // ========================================
+    function renderDashboard() { loadDashboardData(); const d = state.data.dashboard || {}; return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Dashboard</h1></div><div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8"><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="flame" class="w-6 h-6 text-accent-500"></i></div><p class="text-3xl font-bold text-slate-900">${d.todayCalories||0}</p><p class="text-sm text-slate-500 mt-1">Calories</p></div><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="scale" class="w-6 h-6 text-brand-600"></i></div><p class="text-3xl font-bold text-slate-900">${d.currentWeight||'--'}</p><p class="text-sm text-slate-500 mt-1">Weight (kg)</p></div><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="activity" class="w-6 h-6 text-blue-600"></i></div><p class="text-3xl font-bold text-slate-900">${d.bmi||'--'}</p><p class="text-sm text-slate-500 mt-1">BMI</p></div><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="crown" class="w-6 h-6 text-purple-600"></i></div><p class="text-3xl font-bold text-slate-900 capitalize">${d.subscription?.plan||'free'}</p><p class="text-sm text-slate-500 mt-1">Plan</p></div></div>${d.tdee?`<div class="bg-gradient-to-r from-brand-700 to-brand-800 rounded-2xl p-8 shadow-xl text-white card-hover"><h3 class="text-sm font-bold mb-4 text-brand-100 uppercase tracking-wider">Your Fitness Summary</h3><div class="grid grid-cols-3 gap-6"><div><p class="text-brand-200 text-xs uppercase mb-1">BMR</p><p class="text-4xl font-extrabold">${d.bmr}</p></div><div><p class="text-brand-200 text-xs uppercase mb-1">TDEE</p><p class="text-4xl font-extrabold">${d.tdee}</p></div><div><p class="text-brand-200 text-xs uppercase mb-1">Target</p><p class="text-4xl font-extrabold">${d.targetCalories}</p></div></div></div>`:`<div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-8 shadow-xl text-white card-hover"><div class="flex items-center gap-5"><div class="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20"><i data-lucide="info" class="w-8 h-8 text-brand-300"></i></div><div><h3 class="text-xl font-bold mb-1">Complete Your Profile</h3><p class="text-slate-300 text-sm mb-4">Fill in your details to get personalized recommendations.</p><button onclick="navigate('profile')" class="bg-white text-slate-900 px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-100 transition-all">Update Profile →</button></div></div></div>`}`; }
+    async function loadDashboardData() { try { const data = await api('/user/stats'); state.data.dashboard = data; const el = document.getElementById('page-content'); if (el && state.page==='dashboard') { el.innerHTML=renderDashboard(); lucide.createIcons(); } } catch(err){} }
+
+    function renderTrainerDashboard() { return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Trainer Dashboard</h1></div><div class="grid grid-cols-2 lg:grid-cols-3 gap-5 mb-8"><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="users" class="w-6 h-6 text-blue-600"></i></div><p class="text-3xl font-bold text-slate-900">12</p><p class="text-sm text-slate-500 mt-1">Active Clients</p></div><div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="message-circle" class="w-6 h-6 text-brand-600"></i></div><p class="text-3xl font-bold text-slate-900">5</p><p class="text-sm text-slate-500 mt-1">Unread Messages</p></div></div><div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"><h3 class="text-lg font-bold text-slate-900 mb-4">Recent Activity</h3><div class="space-y-3"><div class="flex items-center gap-3 p-3 bg-slate-50 rounded-lg"><i data-lucide="message-square" class="w-5 h-5 text-blue-600"></i><p class="text-sm text-slate-700">A client sent you a message</p></div></div></div>`; }
+
+    // ========================================
+    // CHAT SYSTEM (WITH PAYWALL)
+    // ========================================
+    function renderRealChat() {
+      const isTrainer = state.user?.role === 'trainer';
+      const isFreeCustomer = !isTrainer && (state.user?.subscription?.plan === 'free' || !state.user?.subscription?.plan);
+
+      // PAYWALL: If user is a free customer, show locked screen
+      if (isFreeCustomer) {
+        return `
+        <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Trainer Chat</h1></div>
+        <div class="bg-white rounded-2xl p-12 shadow-sm border border-slate-100 text-center max-w-lg mx-auto mt-16">
+          <div class="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-purple-100"><i data-lucide="lock" class="w-10 h-10 text-purple-500"></i></div>
+          <h2 class="text-2xl font-bold text-slate-900 mb-3">Premium Feature</h2>
+          <p class="text-slate-500 mb-8">You need a Pro or Elite subscription to chat directly with real trainers and get personalized coaching.</p>
+          <button onclick="navigate('subscription')" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3.5 rounded-lg font-semibold transition-all shadow-md hover:shadow-lg">Upgrade to Pro</button>
+        </div>`;
+      }
+
+      // NORMAL CHAT UI for Trainers OR Pro Customers
+      const chatPartners = state.data.chatPartners || [];
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">${isTrainer ? 'Client Messages' : 'Trainer Chat'}</h1></div>
+      <div class="grid lg:grid-cols-3 gap-6" style="height: 70vh;">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-slate-100 font-bold text-slate-900">${isTrainer ? 'My Clients' : 'Select a Trainer'}</div>
+          <div class="flex-1 overflow-y-auto p-3 space-y-2">
+            ${chatPartners.length === 0 ? `<p class="text-sm text-slate-400 p-4">Loading...</p>` : chatPartners.map(p => `<button onclick="openChatWith('${p._id}')" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all border ${state.activeChatId === p._id ? 'bg-brand-50 border-brand-200' : 'border-transparent'}"><div class="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center border-2 border-white shadow-sm"><span class="text-brand-700 text-sm font-bold">${p.name[0].toUpperCase()}</span></div><div class="text-left"><p class="text-sm font-semibold text-slate-900">${p.name}</p></div></button>`).join('')}
+          </div>
+        </div>
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+          ${state.activeChatId ? `<div class="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50"><div class="w-10 h-10 bg-brand-600 rounded-full flex items-center justify-center shadow-sm"><span class="text-white font-bold">${(chatPartners.find(p => p._id === state.activeChatId)?.name || 'U')[0].toUpperCase()}</span></div><div><p class="font-bold text-slate-900 text-sm">${chatPartners.find(p => p._id === state.activeChatId)?.name || 'User'}</p><p class="text-xs text-brand-600 font-medium">Online</p></div></div><div id="chat-messages" class="flex-1 p-6 space-y-4 overflow-y-auto bg-slate-50/30"></div><form onsubmit="sendMessage(event)" class="p-4 border-t border-slate-100 flex gap-3 bg-white"><input type="text" id="chat-input" placeholder="Type your message..." required class="flex-1 px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-5 rounded-lg font-semibold shadow-md"><i data-lucide="send" class="w-4 h-4"></i></button></form>` : `<div class="flex-1 flex items-center justify-center text-slate-400 flex-col gap-3"><i data-lucide="message-circle" class="w-12 h-12 opacity-30"></i><p>Select a person to start chatting</p></div>`}
+        </div>
+      </div>`;
+    }
+
+    async function loadChatPartners() { try { const isTrainer = state.user?.role === 'trainer'; const endpoint = isTrainer ? '/trainer/my-clients' : '/trainer/trainers'; const partners = await api(endpoint); state.data.chatPartners = partners; const el = document.getElementById('page-content'); if (el && (state.page==='trainer' || state.page==='chat')) { el.innerHTML=renderRealChat(); lucide.createIcons(); } } catch(err){} }
+    async function openChatWith(userId) { state.activeChatId = userId; const el = document.getElementById('page-content'); if (el) { el.innerHTML=renderRealChat(); lucide.createIcons(); } try { const messages = await api(`/trainer/history/${userId}`); const box = document.getElementById('chat-messages'); if (!box) return; box.innerHTML = messages.map(m => `<div class="flex gap-3 ${m.senderId === state.user.id ? 'justify-end' : ''} fade-in">${m.senderId !== state.user.id ? `<div class="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center flex-shrink-0"><i data-lucide="user" class="w-4 h-4 text-brand-600"></i></div>` : ''}<div class="${m.senderId === state.user.id ? 'bg-brand-600 text-white rounded-xl rounded-tr-none' : 'bg-white rounded-xl rounded-tl-none border border-slate-100'} p-4 max-w-md shadow-sm"><p class="text-sm">${m.content}</p></div>${m.senderId === state.user.id ? `<div class="w-8 h-8 bg-brand-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold">You</div>` : ''}</div>`).join(''); box.scrollTop = box.scrollHeight; lucide.createIcons(); } catch(err){} }
+    async function sendMessage(e) { e.preventDefault(); if (!state.activeChatId) return; const msg = document.getElementById('chat-input').value; const box = document.getElementById('chat-messages'); try { await api('/trainer/send', 'POST', { receiverId: state.activeChatId, content: msg }); box.innerHTML += `<div class="flex gap-3 justify-end fade-in"><div class="bg-brand-600 text-white rounded-xl rounded-tr-none p-4 max-w-md shadow-sm"><p class="text-sm">${msg}</p></div><div class="w-8 h-8 bg-brand-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold">You</div></div>`; document.getElementById('chat-input').value = ''; box.scrollTop = box.scrollHeight; } catch(err){} }
+
+    // ========================================
+    // PROFILE
+    // ========================================
+    function renderProfile() { loadProfileData(); const u = state.data.profile?.user || state.user || {}; return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Profile</h1></div><div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100"><form onsubmit="handleProfileUpdate(event)" class="space-y-6"><div class="grid sm:grid-cols-2 gap-5"><div><label class="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label><input type="text" id="prof-name" value="${u.name||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div><div><label class="block text-sm font-medium text-slate-700 mb-1.5">Age</label><input type="number" id="prof-age" value="${u.age||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div><div><label class="block text-sm font-medium text-slate-700 mb-1.5">Gender</label><select id="prof-gender" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><option value="" ${!u.gender?'selected':''}>Select...</option><option value="male" ${u.gender==='male'?'selected':''}>Male</option><option value="female" ${u.gender==='female'?'selected':''}>Female</option></select></div><div><label class="block text-sm font-medium text-slate-700 mb-1.5">Weight (kg)</label><input type="number" id="prof-weight" value="${u.weight||''}" step="0.1" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div><div><label class="block text-sm font-medium text-slate-700 mb-1.5">Height (cm)</label><input type="number" id="prof-height" value="${u.height||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div></div><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3.5 rounded-lg font-semibold shadow-md">Save Profile</button></form></div>`; }
+    async function loadProfileData() { try { const data = await api('/user/stats'); state.data.profile = data; const el = document.getElementById('page-content'); if (el && state.page==='profile') { el.innerHTML=renderProfile(); lucide.createIcons(); } } catch(err){} }
+    async function handleProfileUpdate(e) { e.preventDefault(); const body = { name: document.getElementById('prof-name').value, age: parseInt(document.getElementById('prof-age').value)||undefined, gender: document.getElementById('prof-gender').value||undefined, weight: parseFloat(document.getElementById('prof-weight').value)||undefined, height: parseInt(document.getElementById('prof-height').value)||undefined }; try { const data = await api('/user/profile','PUT',body); state.data.profile = data; state.user.name = body.name; localStorage.setItem('fh_user',JSON.stringify(state.user)); showToast('Profile updated!'); render(); } catch(err){} }
+
+    // ========================================
+    // CALORIES
+    // ========================================
+    function renderCalories() { loadCalorieData(); const d = state.data.calories || {}; const log = d.todayLog || {meals:[],totalCalories:0}; return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Calorie Tracker</h1></div><div class="bg-gradient-to-r from-accent-500 to-accent-600 rounded-2xl p-8 shadow-lg text-white card-hover mb-6"><p class="text-orange-100 text-sm uppercase font-semibold">Today's Intake</p><p class="text-5xl font-extrabold mt-1">${log.totalCalories}</p></div><div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6"><h3 class="text-lg font-bold text-slate-900 mb-4">Add Meal</h3><form onsubmit="handleAddMeal(event)" class="grid sm:grid-cols-2 gap-3"><input type="text" id="meal-name" placeholder="Food name" required class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><select id="meal-type" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none bg-white"><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select><input type="number" id="meal-cal" placeholder="Calories" required min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><input type="number" id="meal-protein" placeholder="Protein (g)" min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><input type="number" id="meal-carbs" placeholder="Carbs (g)" min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><input type="number" id="meal-fat" placeholder="Fat (g)" min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><button type="submit" class="sm:col-span-2 bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md">+ Add Meal</button></form></div><div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"><h3 class="text-lg font-bold text-slate-900 mb-4">Today's Meals</h3>${log.meals.length===0?'<p class="text-center py-8 text-slate-400">No meals logged</p>':`<div class="space-y-3">${log.meals.map(m=>`<div class="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100"><div class="flex items-center gap-3"><span class="text-xs font-bold uppercase text-brand-600 bg-brand-50 px-2 py-1 rounded">${m.mealType}</span><p class="text-sm font-semibold text-slate-900">${m.name}</p></div><span class="text-sm font-bold text-accent-600">${m.calories} cal</span></div>`).join('')}</div>`}</div>`; }
+    async function loadCalorieData() { try { const todayLog = await api('/calories/today'); state.data.calories = { todayLog }; const el = document.getElementById('page-content'); if (el && state.page==='calories') { el.innerHTML=renderCalories(); lucide.createIcons(); } } catch(err){} }
+    async function handleAddMeal(e) { e.preventDefault(); try { await api('/calories/log','POST',{ name: document.getElementById('meal-name').value, calories: parseInt(document.getElementById('meal-cal').value), protein: parseFloat(document.getElementById('meal-protein').value)||0, carbs: parseFloat(document.getElementById('meal-carbs').value)||0, fat: parseFloat(document.getElementById('meal-fat').value)||0, mealType: document.getElementById('meal-type').value }); showToast('Meal logged!'); loadCalorieData(); } catch(err){} }
+
+    // ========================================
+    // WEIGHT
+    // ========================================
+    function renderWeight() { loadWeightData(); const history = state.data.weight?.history || []; return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Weight Tracker</h1></div><div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6"><h3 class="text-lg font-bold text-slate-900 mb-5">Log Weight</h3><form onsubmit="handleWeightLog(event)" class="grid sm:grid-cols-3 gap-4"><input type="number" id="weight-val" step="0.1" min="20" required placeholder="Weight (kg)" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><input type="date" id="weight-date" value="${new Date().toISOString().split('T')[0]}" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md">Save</button></form></div><div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"><h3 class="text-lg font-bold text-slate-900 mb-4">History</h3>${history.length===0?'<p class="text-center py-8 text-slate-400">No entries yet</p>':`<div class="space-y-2">${history.slice().reverse().map(e=>`<div class="p-4 bg-slate-50 rounded-xl border border-slate-100"><p class="text-sm font-bold text-slate-900">${e.weight} kg</p><p class="text-xs text-slate-400">${new Date(e.date).toLocaleDateString()}</p></div>`).join('')}</div>`}</div>`; }
+    async function loadWeightData() { try { const history = await api('/weight/history'); state.data.weight = { history }; const el = document.getElementById('page-content'); if (el && state.page==='weight') { el.innerHTML=renderWeight(); lucide.createIcons(); } } catch(err){} }
+    async function handleWeightLog(e) { e.preventDefault(); try { await api('/weight/log','POST',{ weight: parseFloat(document.getElementById('weight-val').value), date: document.getElementById('weight-date').value }); showToast('Weight logged!'); loadWeightData(); } catch(err){} }
+
+    // ========================================
+    // EXERCISES
+    // ========================================
+    function renderExercises() { loadExercises(); const list = state.data.exercises?.list || []; return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Exercises</h1></div>${list.length===0?'<p>Loading...</p>':`<div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">${list.map(ex=>`<div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 card-hover cursor-pointer" onclick="showExerciseDetail('${ex._id}')"><div class="h-44 bg-slate-200 relative overflow-hidden"><img src="${ex.image}" alt="${ex.name}" class="w-full h-full object-cover" onerror="this.src='https://picsum.photos/seed/${ex.name.replace(/ /g,'')}/400/300.jpg'"><div class="absolute top-3 right-3"><span class="text-[10px] font-bold uppercase px-2.5 py-1 rounded-full shadow-sm ${ex.difficulty==='beginner'?'bg-brand-100 text-brand-800':ex.difficulty==='intermediate'?'bg-yellow-100 text-yellow-800':'bg-red-100 text-red-800'}">${ex.difficulty}</span></div></div><div class="p-5"><h3 class="font-bold text-lg text-slate-900 mb-1">${ex.name}</h3><p class="text-xs text-slate-500 mb-4">${ex.description}</p><div class="flex items-center gap-4 text-xs text-slate-500 font-medium"><span>${ex.duration} min</span><span>${ex.caloriesBurned} cal</span></div></div></div>`).join('')}</div>`}<div id="exercise-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onclick="this.classList.add('hidden')"><div class="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] overflow-y-auto p-8 shadow-2xl" onclick="event.stopPropagation()" id="exercise-modal-content"></div></div>`; }
+    async function loadExercises() { try { const list = await api('/exercises'); state.data.exercises = { list }; const el = document.getElementById('page-content'); if (el && state.page==='exercises') { el.innerHTML=renderExercises(); lucide.createIcons(); } } catch(err){} }
+    async function showExerciseDetail(id) { try { const ex = await api(`/exercises/${id}`); const content = document.getElementById('exercise-modal-content'); content.innerHTML = `<div class="flex items-center justify-between mb-5"><h2 class="text-2xl font-bold text-slate-900">${ex.name}</h2><button onclick="document.getElementById('exercise-modal').classList.add('hidden')" class="text-slate-300 hover:text-slate-600"><i data-lucide="x" class="w-6 h-6"></i></button></div><img src="${ex.image}" alt="${ex.name}" class="w-full h-48 object-cover rounded-xl mb-6" onerror="this.src='https://picsum.photos/seed/${ex.name.replace(/ /g,'')}/400/300.jpg'"><p class="text-slate-600 text-sm mb-6">${ex.description}</p><div class="grid grid-cols-3 gap-3 mb-6"><div class="text-center p-4 bg-slate-50 rounded-xl border border-slate-100"><p class="text-xs text-slate-500 uppercase">Duration</p><p class="text-2xl font-extrabold text-slate-900">${ex.duration}m</p></div><div class="text-center p-4 bg-slate-50 rounded-xl border border-slate-100"><p class="text-xs text-slate-500 uppercase">Calories</p><p class="text-2xl font-extrabold text-accent-600">${ex.caloriesBurned}</p></div><div class="text-center p-4 bg-slate-50 rounded-xl border border-slate-100"><p class="text-xs text-slate-500 uppercase">Level</p><p class="text-2xl font-extrabold text-brand-600 capitalize">${ex.difficulty}</p></div></div>`; document.getElementById('exercise-modal').classList.remove('hidden'); lucide.createIcons(); } catch(err){} }
+
+    // ========================================
+    // SUBSCRIPTION (WORKING UPGRADE)
+    // ========================================
+    function renderSubscription() { 
+      const currentPlan = state.user?.subscription?.plan || 'free';
+      return `<div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Subscription</h1></div><div class="grid md:grid-cols-3 gap-6"><div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 card-hover ${currentPlan==='free'?'ring-2 ring-brand-600':''}"><h3 class="text-xl font-bold text-slate-900 mb-2">Free</h3><p class="text-4xl font-extrabold text-slate-900 mb-6">$0<span class="text-base font-normal text-slate-400">/mo</span></p><ul class="space-y-3 mb-8"><li class="flex items-center gap-2 text-sm text-slate-600"><i data-lucide="check" class="w-4 h-4 text-brand-600"></i>Basic Tracking</li><li class="flex items-center gap-2 text-sm text-slate-400"><i data-lucide="x" class="w-4 h-4 text-slate-300"></i>Trainer Chat</li></ul><button class="w-full py-3 border-2 border-slate-200 rounded-lg font-semibold text-slate-500">${currentPlan==='free'?'Current Plan':'Downgrade'}</button></div><div class="bg-brand-700 rounded-2xl p-8 shadow-xl card-hover text-white ${currentPlan==='pro'?'ring-4 ring-accent-500':''}"><h3 class="text-xl font-bold mb-2">Pro</h3><p class="text-4xl font-extrabold mb-6">$9<span class="text-base font-normal text-brand-200">/mo</span></p><ul class="space-y-3 mb-8"><li class="flex items-center gap-2 text-sm text-brand-100"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>All Features</li><li class="flex items-center gap-2 text-sm text-brand-100"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>Trainer Chat</li></ul><button onclick="upgradePlan('pro')" class="w-full py-3.5 bg-white text-brand-800 rounded-lg font-bold hover:bg-brand-50 shadow-md">${currentPlan==='pro'?'Current Plan':'Upgrade Now'}</button></div><div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 card-hover ${currentPlan==='elite'?'ring-2 ring-brand-600':''}"><h3 class="text-xl font-bold text-slate-900 mb-2">Elite</h3><p class="text-4xl font-extrabold text-slate-900 mb-6">$19<span class="text-base font-normal text-slate-400">/mo</span></p><ul class="space-y-3 mb-8"><li class="flex items-center gap-2 text-sm text-slate-600"><i data-lucide="check" class="w-4 h-4 text-brand-600"></i>Everything in Pro</li><li class="flex items-center gap-2 text-sm text-slate-600"><i data-lucide="check" class="w-4 h-4 text-brand-600"></i>1-on-1 Sessions</li></ul><button onclick="upgradePlan('elite')" class="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 shadow-md">${currentPlan==='elite'?'Current Plan':'Go Elite'}</button></div></div>`; 
+    }
+    async function upgradePlan(plan) {
+      try {
+        const data = await api('/subscription/upgrade', 'POST', { plan });
+        state.user.subscription.plan = data.plan;
+        localStorage.setItem('fh_user', JSON.stringify(state.user));
+        showToast(`Upgraded to ${data.plan} plan!`);
+        render();
+      } catch(err) {}
+    }
+
+    render();
+  </script>
+</body>
+</html>
