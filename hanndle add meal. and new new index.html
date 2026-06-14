@@ -1,0 +1,908 @@
+ async function handleAddMeal(e) { 
+      e.preventDefault(); 
+      try {
+        await api('/calories/log','POST',{name:document.getElementById('meal-name').value,calories:parseInt(document.getElementById('meal-cal').value),mealType:document.getElementById('meal-type').value}); 
+        showToast('Meal logged!'); loadCalorieData(); 
+      } catch(err){} 
+    }
+
+
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fitness Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
+            accent: { 400:'#fb923c',500:'#f97316',600:'#ea580c' }
+          },
+          fontFamily: { sans: ['Inter','sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <style>
+    * { font-family: 'Inter', sans-serif; }
+    ::selection { background: #059669; color: #fff; }
+    .fade-in { animation: fadeIn 0.4s ease-out; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .card-hover { transition: all 0.3s ease; }
+    .card-hover:hover { transform: translateY(-4px); box-shadow: 0 12px 24px -8px rgba(0,0,0,0.12); }
+    .nav-item { transition: all 0.15s ease; }
+    .progress-fill { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+  <div id="app"></div>
+
+  <script>
+    // ============================================================
+    // STATE & CONFIG
+    // ============================================================
+    const state = {
+      token: localStorage.getItem('fh_token'),
+      user: JSON.parse(localStorage.getItem('fh_user') || 'null'),
+      page: 'dashboard',
+      data: {},
+      activeChatId: null
+    };
+
+    const API = 'http://localhost:5000/api';
+    const chartInstances = {};
+
+    // ============================================================
+    // API HELPER
+    // ============================================================
+    async function api(endpoint, method = 'GET', body = null) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (state.token) headers['Authorization'] = `Bearer ${state.token}`;
+      try {
+        const res = await fetch(`${API}${endpoint}`, { method, headers, body: body ? JSON.stringify(body) : null });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'API Error');
+        return data;
+      } catch (err) {
+        showToast(err.message, 'error');
+        throw err;
+      }
+    }
+
+    // ============================================================
+    // TOAST
+    // ============================================================
+    function showToast(message, type = 'success') {
+      const existing = document.querySelector('.fh-toast');
+      if (existing) existing.remove();
+      const toast = document.createElement('div');
+      const bg = type === 'error' ? 'bg-red-600' : type === 'info' ? 'bg-blue-600' : 'bg-brand-600';
+      const icon = type === 'error' ? 'x-circle' : type === 'info' ? 'info' : 'check-circle';
+      toast.className = `fh-toast fixed top-6 right-6 z-[9999] ${bg} text-white px-6 py-3.5 rounded-xl shadow-2xl fade-in flex items-center gap-3`;
+      toast.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5"></i><span class="text-sm font-medium">${message}</span>`;
+      document.body.appendChild(toast);
+      lucide.createIcons({ nodes: [toast] });
+      setTimeout(() => { toast.style.opacity='0'; toast.style.transition='opacity 0.3s'; setTimeout(()=>toast.remove(),300); }, 3000);
+    }
+
+    // ============================================================
+    // AUTH HELPERS
+    // ============================================================
+    function setAuth(token, user) {
+      state.token = token; state.user = user;
+      localStorage.setItem('fh_token', token);
+      localStorage.setItem('fh_user', JSON.stringify(user));
+    }
+    
+    function logout() {
+      state.token = null; state.user = null; state.page = 'dashboard'; state.data = {}; state.activeChatId = null;
+      localStorage.removeItem('fh_token'); localStorage.removeItem('fh_user');
+      render();
+    }
+    
+    function navigate(page) { state.page = page; render(); }
+
+    // ============================================================
+    // CHART HELPERS
+    // ============================================================
+    function destroyChart(id) { if (chartInstances[id]) { chartInstances[id].destroy(); delete chartInstances[id]; } }
+    function createChart(id, config) { destroyChart(id); const el = document.getElementById(id); if (!el) return null; chartInstances[id] = new Chart(el.getContext('2d'), config); return chartInstances[id]; }
+
+    function initPageCharts() {
+      const p = state.page;
+      const isTrainer = state.user?.role === 'trainer';
+      if (isTrainer) return;
+      if (p === 'dashboard') initDashboardCharts();
+      else if (p === 'calories') initCalorieCharts();
+      else if (p === 'weight') initWeightChart();
+      else if (p === 'workouts') initWorkoutCharts();
+    }
+
+    // ============================================================
+    // RENDER ORCHESTRATOR
+    // ============================================================
+    function render() {
+      const app = document.getElementById('app');
+      if (!state.token) { app.innerHTML = renderAuth(); }
+      else { app.innerHTML = renderApp(); }
+      lucide.createIcons();
+      setTimeout(() => initPageCharts(), 50);
+    }
+
+    // ============================================================
+    // AUTH PAGE
+    // ============================================================
+    function renderAuth() {
+      return `
+      <div class="min-h-screen flex bg-white">
+        <div class="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-brand-700 via-brand-800 to-brand-900 text-white flex-col justify-between p-12 relative overflow-hidden">
+          <div class="absolute top-0 left-0 w-full h-full opacity-10" style="background-image: radial-gradient(#fff 1px, transparent 1px); background-size: 20px 20px;"></div>
+          <div class="relative z-10">
+            <div class="flex items-center gap-3 mb-2">
+              <div class="w-12 h-12 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/20"><i data-lucide="dumbbell" class="w-7 h-7 text-brand-200"></i></div>
+              <span class="text-2xl font-bold tracking-tight">Fitness Hub</span>
+            </div>
+          </div>
+          <div class="relative z-10 space-y-8">
+            <h2 class="text-5xl font-extrabold leading-tight tracking-tight">Transform your body.<br><span class="text-brand-300">Transform your life.</span></h2>
+            <p class="text-brand-200 text-lg">Track calories, log workouts, set goals, chat with trainers, and get AI-powered insights.</p>
+          </div>
+          <div class="relative z-10 text-brand-400 text-xs">© 2025 Fitness Hub</div>
+        </div>
+        <div class="w-full lg:w-1/2 flex items-center justify-center p-8 bg-slate-50">
+          <div class="max-w-md w-full fade-in">
+            <h2 class="text-3xl font-bold text-slate-900 mb-1">Welcome back</h2>
+            <p class="text-slate-500 mb-8">Sign in or create an account</p>
+            <div class="flex bg-slate-200/70 rounded-lg p-1 mb-8">
+              <button onclick="switchAuthTab('login')" id="tab-login" class="flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm">Sign In</button>
+              <button onclick="switchAuthTab('register')" id="tab-register" class="flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500">Sign Up</button>
+            </div>
+            <form id="login-form" onsubmit="handleLogin(event)" class="space-y-5">
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label><input type="email" id="login-email" required placeholder="you@example.com" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Password</label><input type="password" id="login-password" required placeholder="Enter password" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-3.5 rounded-lg font-semibold shadow-md transition-all">Sign In</button>
+            </form>
+            <form id="register-form" class="hidden" onsubmit="handleRegister(event)">
+              <div class="space-y-5">
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label><input type="text" id="reg-name" required placeholder="John Doe" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Email</label><input type="email" id="reg-email" required placeholder="you@example.com" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Password</label><input type="password" id="reg-password" required minlength="6" placeholder="Min 6 characters" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+                <div><label class="block text-sm font-medium text-slate-700 mb-1.5">I am a...</label><select id="reg-role" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><option value="customer">Customer (Track my fitness)</option><option value="trainer">Trainer (Coach clients)</option></select></div>
+                <button type="submit" class="w-full bg-brand-600 hover:bg-brand-700 text-white py-3.5 rounded-lg font-semibold shadow-md transition-all">Create Account</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function switchAuthTab(tab) {
+      const lf = document.getElementById('login-form'), rf = document.getElementById('register-form');
+      const tl = document.getElementById('tab-login'), tr = document.getElementById('tab-register');
+      if (tab === 'login') { lf.classList.remove('hidden'); rf.classList.add('hidden'); tl.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm'; tr.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500'; }
+      else { lf.classList.add('hidden'); rf.classList.remove('hidden'); tr.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all bg-white text-slate-900 shadow-sm'; tl.className='flex-1 py-2.5 text-sm font-semibold rounded-md transition-all text-slate-500'; }
+    }
+    
+    async function handleLogin(e) { 
+      e.preventDefault(); 
+      try { 
+        const data = await api('/auth/login','POST',{email:document.getElementById('login-email').value,password:document.getElementById('login-password').value}); 
+        setAuth(data.token,data.user); showToast('Welcome back!'); render(); 
+      } catch(err){} 
+    }
+    
+    async function handleRegister(e) { 
+      e.preventDefault(); 
+      try { 
+        const data = await api('/auth/register','POST',{name:document.getElementById('reg-name').value,email:document.getElementById('reg-email').value,password:document.getElementById('reg-password').value,role:document.getElementById('reg-role').value}); 
+        setAuth(data.token,data.user); showToast('Account created!'); render(); 
+      } catch(err){} 
+    }
+
+    // ============================================================
+    // APP LAYOUT
+    // ============================================================
+    function renderApp() {
+      const isTrainer = state.user?.role === 'trainer';
+      const customerMenu = [
+        {id:'dashboard',icon:'layout-dashboard',label:'Dashboard'},
+        {id:'profile',icon:'user-circle',label:'Profile'},
+        {id:'calories',icon:'flame',label:'Calories'},
+        {id:'weight',icon:'trending-down',label:'Weight'},
+        {id:'exercises',icon:'dumbbell',label:'Exercises'},
+        {id:'workouts',icon:'zap',label:'Workouts'},
+        {id:'goals',icon:'target',label:'Goals'},
+        {id:'subscription',icon:'crown',label:'Subscription'},
+        {id:'trainer',icon:'message-circle',label:'Trainer Chat'}
+      ];
+      const trainerMenu = [
+        {id:'dashboard',icon:'layout-dashboard',label:'Dashboard'},
+        {id:'chat',icon:'message-circle',label:'Messages'},
+        {id:'profile',icon:'user-circle',label:'My Profile'}
+      ];
+      const menuItems = isTrainer ? trainerMenu : customerMenu;
+      const title = isTrainer ? 'Trainer Hub' : 'Fitness Hub';
+      const brandIcon = isTrainer ? 'shield' : 'dumbbell';
+
+      return `<div class="flex min-h-screen bg-slate-50">
+        <aside class="hidden lg:flex flex-col w-72 bg-white border-r border-slate-100 fixed h-full z-40">
+          <div class="p-6 border-b border-slate-100">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-md"><i data-lucide="${brandIcon}" class="w-5 h-5 text-white"></i></div>
+              <span class="text-xl font-bold text-slate-900 tracking-tight">${title}</span>
+            </div>
+          </div>
+          <nav class="flex-1 p-4 space-y-1 overflow-y-auto">
+            ${menuItems.map(item => `<button onclick="navigate('${item.id}')" class="nav-item w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium ${state.page===item.id ? 'bg-brand-50 text-brand-700 font-semibold border-l-4 border-brand-600' : 'text-slate-500 hover:bg-slate-50 border-l-4 border-transparent'}"><i data-lucide="${item.icon}" class="w-5 h-5"></i>${item.label}</button>`).join('')}
+          </nav>
+          <div class="p-4 border-t border-slate-100">
+            <div class="flex items-center gap-3 px-4 py-2">
+              <div class="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center border-2 border-white shadow-sm"><span class="text-brand-700 text-sm font-bold">${(state.user?.name||'U')[0].toUpperCase()}</span></div>
+              <div class="flex-1 min-w-0"><p class="text-sm font-semibold text-slate-900 truncate">${state.user?.name||'User'}</p><p class="text-xs text-slate-400 truncate capitalize">${state.user?.role||'Customer'} • ${state.user?.subscription?.plan||'Free'}</p></div>
+              <button onclick="logout()" class="text-slate-300 hover:text-red-500 transition-colors p-1" title="Logout"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+            </div>
+          </div>
+        </aside>
+        <nav class="lg:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-md border-t border-slate-200 z-50 px-2 py-1">
+          <div class="flex justify-around">${menuItems.slice(0,5).map(item=>`<button onclick="navigate('${item.id}')" class="flex flex-col items-center py-2 px-2 rounded-lg transition-all ${state.page===item.id?'text-brand-600':'text-slate-400'}"><i data-lucide="${item.icon}" class="w-5 h-5"></i><span class="text-[10px] mt-0.5 font-medium">${item.label.split(' ')[0]}</span></button>`).join('')}</div>
+        </nav>
+        <main class="flex-1 lg:ml-72 pb-20 lg:pb-0">
+          <div class="max-w-7xl mx-auto p-6 sm:p-8 lg:p-10">
+            <div class="fade-in" id="page-content">${renderPage()}</div>
+          </div>
+        </main>
+      </div>`;
+    }
+
+    function renderPage() {
+      const isTrainer = state.user?.role === 'trainer';
+      if (isTrainer) {
+        switch(state.page) {
+          case 'profile': return renderProfile();
+          case 'chat': return renderChat();
+          default: return renderTrainerDashboard();
+        }
+      }
+      switch(state.page) {
+        case 'profile': return renderProfile();
+        case 'calories': return renderCalories();
+        case 'weight': return renderWeight();
+        case 'exercises': return renderExercises();
+        case 'workouts': return renderWorkouts();
+        case 'goals': return renderGoals();
+        case 'subscription': return renderSubscription();
+        case 'trainer': return renderChat();
+        default: return renderDashboard();
+      }
+    }
+
+    // ============================================================
+    // DASHBOARD
+    // ============================================================
+    function renderDashboard() {
+      loadDashboardData(); 
+      const d = state.data.dashboard || {};
+      const totalCal = d.todayCalories || 0;
+      const curWeight = d.currentWeight || '--';
+      const bmi = d.bmi || '--';
+      const plan = d.subscription?.plan || 'free';
+      const bmr = d.bmr || null;
+      const tdee = d.tdee || null;
+      const targetCal = d.targetCalories || null;
+
+      return `
+      <div class="mb-8">
+        <h1 class="text-3xl font-bold text-slate-900 tracking-tight">Dashboard</h1>
+        <p class="text-slate-500 mt-1">Welcome back, ${state.user?.name||'User'}! ${new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'})}</p>
+      </div>
+
+      <!-- AI COACH -->
+      <div class="mb-8 bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl p-8 shadow-xl text-white card-hover">
+        <div class="flex items-center gap-4 mb-4">
+          <div class="w-14 h-14 bg-white/20 rounded-2xl flex items-center justify-center border border-white/30"><i data-lucide="bot" class="w-8 h-8"></i></div>
+          <div><h3 class="text-xl font-bold">AI Smart Coach</h3><p class="text-purple-200 text-sm">Personalized insights powered by AI</p></div>
+        </div>
+        <div id="ai-insight-box" class="bg-white/10 border border-white/20 rounded-xl p-5 mb-4 text-sm min-h-[80px] flex items-center"><p class="text-purple-100">Click the button to let the AI analyze your fitness data...</p></div>
+        <button onclick="loadAiInsights()" class="bg-white text-purple-700 px-6 py-3 rounded-lg font-bold hover:bg-purple-50 transition-all shadow-md flex items-center gap-2"><i data-lucide="sparkles" class="w-4 h-4"></i> Generate AI Analysis</button>
+      </div>
+
+      <!-- STAT CARDS -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover">
+          <div class="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="flame" class="w-6 h-6 text-accent-500"></i></div>
+          <p class="text-3xl font-bold text-slate-900">${totalCal.toLocaleString()}</p>
+          <p class="text-sm text-slate-500 mt-1">Calories Today</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover">
+          <div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="scale" class="w-6 h-6 text-brand-600"></i></div>
+          <p class="text-3xl font-bold text-slate-900">${curWeight}</p>
+          <p class="text-sm text-slate-500 mt-1">Weight (kg)</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover">
+          <div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="activity" class="w-6 h-6 text-blue-600"></i></div>
+          <p class="text-3xl font-bold text-slate-900">${bmi}</p>
+          <p class="text-sm text-slate-500 mt-1">BMI</p>
+        </div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover">
+          <div class="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="crown" class="w-6 h-6 text-purple-600"></i></div>
+          <p class="text-3xl font-bold text-slate-900 capitalize">${plan}</p>
+          <p class="text-sm text-slate-500 mt-1">Plan</p>
+        </div>
+      </div>
+
+      <!-- BMR/TDEE or COMPLETE PROFILE -->
+      ${tdee ? `
+      <div class="bg-gradient-to-r from-brand-700 to-brand-800 rounded-2xl p-8 shadow-xl text-white card-hover mb-8">
+        <h3 class="text-sm font-bold mb-4 text-brand-100 uppercase tracking-wider">Your Fitness Summary</h3>
+        <div class="grid grid-cols-3 gap-6">
+          <div><p class="text-brand-200 text-xs uppercase mb-1">BMR</p><p class="text-4xl font-extrabold">${bmr}</p></div>
+          <div><p class="text-brand-200 text-xs uppercase mb-1">TDEE</p><p class="text-4xl font-extrabold">${tdee}</p></div>
+          <div><p class="text-brand-200 text-xs uppercase mb-1">Target</p><p class="text-4xl font-extrabold">${targetCal}</p></div>
+        </div>
+      </div>` : `
+      <div class="bg-gradient-to-r from-slate-800 to-slate-900 rounded-2xl p-8 shadow-xl text-white card-hover mb-8">
+        <div class="flex items-center gap-5">
+          <div class="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center border border-white/20"><i data-lucide="info" class="w-8 h-8 text-brand-300"></i></div>
+          <div><h3 class="text-xl font-bold mb-1">Complete Your Profile</h3><p class="text-slate-300 text-sm mb-4">Fill in your details to get personalized BMR, TDEE, and target calorie recommendations.</p><button onclick="navigate('profile')" class="bg-white text-slate-900 px-5 py-2.5 rounded-lg text-sm font-bold hover:bg-slate-100 transition-all">Update Profile →</button></div>
+        </div>
+      </div>`}
+
+      <!-- CHARTS -->
+      <div class="grid lg:grid-cols-5 gap-6 mb-8">
+        <div class="lg:col-span-3 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <h3 class="text-lg font-bold text-slate-900 mb-4">Weekly Activity</h3>
+          <canvas id="dashboardWeeklyChart" height="200"></canvas>
+        </div>
+        <div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+          <h3 class="text-lg font-bold text-slate-900 mb-4">Calorie Breakdown</h3>
+          <canvas id="dashboardPieChart" height="200"></canvas>
+        </div>
+      </div>`;
+    }
+
+    function initDashboardCharts() {
+      createChart('dashboardWeeklyChart', {
+        type:'bar',
+        data:{ labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets:[
+          { label:'Burned', data:[320,450,280,520,380,600,420], backgroundColor:'#059669', borderRadius:6, barThickness:20 },
+          { label:'Consumed', data:[1800,2100,1950,2200,1750,2300,1680], backgroundColor:'#e2e8f0', borderRadius:6, barThickness:20 }
+        ]},
+        options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, padding:16, font:{family:'Inter',size:12} } } }, scales:{ y:{ beginAtZero:true, grid:{color:'#f1f5f9'}, ticks:{font:{family:'Inter',size:11}} }, x:{ grid:{display:false}, ticks:{font:{family:'Inter',size:11}} } } }
+      });
+      createChart('dashboardPieChart', {
+        type:'doughnut',
+        data:{ labels:['Protein','Carbs','Fat'], datasets:[{ data:[35,45,20], backgroundColor:['#059669','#3b82f6','#eab308'], borderWidth:0 }] },
+        options:{ responsive:true, cutout:'65%', plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, padding:16, font:{family:'Inter',size:12} } } } }
+      });
+    }
+
+    async function loadDashboardData() { 
+      try { 
+        const data = await api('/user/stats'); 
+        state.data.dashboard = data; 
+        const el = document.getElementById('page-content'); 
+        if (el && state.page==='dashboard') { el.innerHTML=renderDashboard(); lucide.createIcons(); initDashboardCharts(); } 
+      } catch(err){} 
+    }
+
+    async function loadAiInsights() {
+      const box = document.getElementById('ai-insight-box');
+      if (!box) return;
+      box.innerHTML = `<p class="animate-pulse text-purple-100">🤖 AI is analyzing your profile and recent activity...</p>`;
+      try {
+        const data = await api('/ai/coach', 'POST');
+        const formatted = data.insight.replace(/\*\*(.*?)\*\*/g,'<strong class="text-white">$1</strong>').replace(/\n/g,'<br>');
+        box.innerHTML = `<p>${formatted}</p>`;
+      } catch(err) {
+        box.innerHTML = `<p class="text-red-200">Could not reach AI service. Check server logs.</p>`;
+      }
+    }
+
+    function renderTrainerDashboard() {
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Trainer Dashboard</h1><p class="text-slate-500 mt-1">Manage your clients</p></div>
+      <div class="grid grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="users" class="w-6 h-6 text-blue-600"></i></div><p class="text-3xl font-bold text-slate-900">12</p><p class="text-sm text-slate-500 mt-1">Active Clients</p></div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-brand-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="message-circle" class="w-6 h-6 text-brand-600"></i></div><p class="text-3xl font-bold text-slate-900">5</p><p class="text-sm text-slate-500 mt-1">Unread Messages</p></div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover"><div class="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center mb-3"><i data-lucide="calendar-check" class="w-6 h-6 text-purple-600"></i></div><p class="text-3xl font-bold text-slate-900">8</p><p class="text-sm text-slate-500 mt-1">Sessions Today</p></div>
+      </div>`;
+    }
+
+    // ============================================================
+    // PROFILE
+    // ============================================================
+    function renderProfile() {
+      const u = state.user || {};
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Profile</h1></div>
+      <div class="grid lg:grid-cols-3 gap-6">
+        <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 text-center">
+          <div class="w-24 h-24 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 mx-auto mb-4 flex items-center justify-center text-4xl font-bold text-white shadow-lg">${(u.name||'U')[0].toUpperCase()}</div>
+          <h3 class="text-xl font-bold text-slate-900">${u.name||'User'}</h3>
+          <p class="text-slate-400 text-sm mt-1">${u.email||''}</p>
+          <div class="mt-4 inline-block px-3 py-1 rounded-full text-xs font-semibold capitalize ${u.role==='trainer'?'bg-purple-100 text-purple-700':'bg-brand-100 text-brand-700'}">${u.role||'Customer'}</div>
+          <hr class="my-6 border-slate-100">
+          <div class="space-y-3 text-left text-sm">
+            <div class="flex justify-between"><span class="text-slate-500">Plan</span><span class="font-semibold text-purple-600 capitalize">${u.subscription?.plan||'Free'}</span></div>
+          </div>
+        </div>
+        <div class="lg:col-span-2 bg-white rounded-2xl p-8 shadow-sm border border-slate-100">
+          <h3 class="text-lg font-bold text-slate-900 mb-6">Edit Profile</h3>
+          <form onsubmit="handleProfileUpdate(event)" class="space-y-5">
+            <div class="grid sm:grid-cols-2 gap-5">
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label><input type="text" id="prof-name" value="${u.name||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Age</label><input type="number" id="prof-age" value="${u.age||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Gender</label><select id="prof-gender" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><option value="" ${!u.gender?'selected':''}>Select...</option><option value="male" ${u.gender==='male'?'selected':''}>Male</option><option value="female" ${u.gender==='female'?'selected':''}>Female</option></select></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Weight (kg)</label><input type="number" id="prof-weight" value="${u.weight||''}" step="0.1" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Height (cm)</label><input type="number" id="prof-height" value="${u.height||''}" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"></div>
+              <div><label class="block text-sm font-medium text-slate-700 mb-1.5">Fitness Goal</label><select id="prof-goal" class="w-full px-4 py-3 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none"><option value="" ${!u.fitnessGoal?'selected':''}>Select...</option><option value="lose" ${u.fitnessGoal==='lose'?'selected':''}>Lose Weight</option><option value="maintain" ${u.fitnessGoal==='maintain'?'selected':''}>Maintain</option><option value="gain" ${u.fitnessGoal==='gain'?'selected':''}>Gain Muscle</option></select></div>
+            </div>
+            <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3.5 rounded-lg font-semibold shadow-md transition-all">Save Profile</button>
+          </form>
+        </div>
+      </div>`;
+    }
+
+    async function handleProfileUpdate(e) {
+      e.preventDefault();
+      const body = { name:document.getElementById('prof-name').value, age:parseInt(document.getElementById('prof-age').value)||undefined, gender:document.getElementById('prof-gender').value||undefined, weight:parseFloat(document.getElementById('prof-weight').value)||undefined, height:parseInt(document.getElementById('prof-height').value)||undefined, fitnessGoal:document.getElementById('prof-goal').value||undefined };
+      try {
+        const data = await api('/user/profile','PUT',body);
+        state.user = { ...state.user, ...body };
+        localStorage.setItem('fh_user',JSON.stringify(state.user));
+        showToast('Profile updated!');
+        render();
+      } catch(err){}
+    }
+
+    // ============================================================
+    // CALORIES
+    // ============================================================
+    function renderCalories() {
+      loadCalorieData();
+      const d = state.data.calories || {};
+      const log = d.todayLog || {meals:[], totalCalories:0};
+      const totalCal = log.totalCalories || 0;
+      const goalCal = 2200;
+      const remaining = Math.max(0, goalCal - totalCal);
+      const pct = Math.min(100, Math.round((totalCal/goalCal)*100));
+      const barColor = pct > 90 ? 'from-yellow-500 to-orange-500' : 'from-brand-500 to-brand-600';
+
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Calorie Tracker</h1></div>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-6">
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover text-center"><p class="text-sm text-slate-500 mb-1">Consumed</p><p class="text-3xl font-bold text-slate-900">${totalCal.toLocaleString()}</p><p class="text-xs text-slate-400">kcal</p></div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover text-center"><p class="text-sm text-slate-500 mb-1">Remaining</p><p class="text-3xl font-bold text-blue-600">${remaining.toLocaleString()}</p><p class="text-xs text-slate-400">kcal</p></div>
+        <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 card-hover text-center"><p class="text-sm text-slate-500 mb-1">Daily Goal</p><p class="text-3xl font-bold text-slate-900">${goalCal.toLocaleString()}</p><p class="text-xs text-slate-400">kcal</p></div>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <div class="flex justify-between items-center mb-2"><span class="text-sm font-semibold text-slate-900">Daily Progress</span><span class="text-sm text-slate-500">${totalCal.toLocaleString()} / ${goalCal.toLocaleString()} kcal</span></div>
+        <div class="w-full h-3 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-gradient-to-r ${barColor} rounded-full progress-fill" style="width:${pct}%"></div></div>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Add Meal</h3>
+        <form onsubmit="handleAddMeal(event)" class="grid sm:grid-cols-2 gap-3">
+          <input type="text" id="meal-name" placeholder="Food name" required class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <select id="meal-type" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none bg-white"><option value="breakfast">Breakfast</option><option value="lunch">Lunch</option><option value="dinner">Dinner</option><option value="snack">Snack</option></select>
+          <input type="number" id="meal-cal" placeholder="Calories" required min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md transition-all">+ Add Meal</button>
+        </form>
+      </div>
+      <div class="grid lg:grid-cols-2 gap-6 mb-6">
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"><h3 class="text-lg font-bold text-slate-900 mb-4">Weekly Calorie Trend</h3><canvas id="calorieTrendChart" height="200"></canvas></div>
+        <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100"><h3 class="text-lg font-bold text-slate-900 mb-4">Macros Split</h3><canvas id="macroChart" height="200"></canvas></div>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Today's Food Log</h3>
+        ${renderCalorieLogList(log.meals)}
+      </div>`;
+    }
+
+    function renderCalorieLogList(meals) {
+      const mealOrder = ['breakfast','lunch','dinner','snack'];
+      const mealLabels = {breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snack:'Snack'};
+      const mealIcons = {breakfast:'sunrise',lunch:'sun',dinner:'moon',snack:'cookie'};
+      const mealColors = {breakfast:'text-yellow-500',lunch:'text-brand-500',dinner:'text-blue-500',snack:'text-orange-500'};
+      let html = '';
+      mealOrder.forEach(meal => {
+        const items = (meals||[]).filter(f => f.mealType === meal);
+        if (!items.length) return;
+        const mealTotal = items.reduce((s,f)=>s+f.calories,0);
+        html += `<div class="mb-5"><div class="flex items-center gap-2 mb-3"><i data-lucide="${mealIcons[meal]}" class="w-4 h-4 ${mealColors[meal]}"></i><span class="font-semibold text-slate-900 text-sm">${mealLabels[meal]}</span><span class="ml-auto text-xs text-slate-400 font-medium">${mealTotal} kcal</span></div>`;
+        html += items.map(f => `<div class="flex items-center justify-between py-3 px-4 bg-slate-50 rounded-xl mb-2"><span class="text-sm text-slate-700">${f.name}</span><span class="text-sm font-semibold text-slate-500">${f.calories} kcal</span></div>`).join('');
+        html += '</div>';
+      });
+      return html || '<p class="text-slate-400 text-sm">No meals logged today.</p>';
+    }
+
+    function initCalorieCharts() {
+      createChart('calorieTrendChart', { type:'line', data:{ labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets:[{ label:'Consumed', data:[1800,2100,1950,2200,1750,2300,1680], borderColor:'#059669', backgroundColor:'rgba(5,150,105,0.08)', fill:true, tension:0.4, pointRadius:4, pointBackgroundColor:'#059669' },{ label:'Goal', data:[2200,2200,2200,2200,2200,2200,2200], borderColor:'#e2e8f0', borderDash:[6,4], pointRadius:0, fill:false }] }, options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, padding:16, font:{family:'Inter',size:12} } } }, scales:{ y:{ beginAtZero:false, grid:{color:'#f1f5f9'}, ticks:{font:{family:'Inter',size:11}} }, x:{ grid:{display:false}, ticks:{font:{family:'Inter',size:11}} } } } });
+      createChart('macroChart', { type:'doughnut', data:{ labels:['Protein (35%)','Carbs (45%)','Fat (20%)'], datasets:[{ data:[35,45,20], backgroundColor:['#059669','#3b82f6','#eab308'], borderWidth:0 }] }, options:{ responsive:true, cutout:'60%', plugins:{ legend:{ position:'bottom', labels:{ usePointStyle:true, padding:12, font:{family:'Inter',size:12} } } } } });
+    }
+
+    async function loadCalorieData() { try { const todayLog = await api('/calories/today'); state.data.calories = { todayLog }; const el = document.getElementById('page-content'); if (el && state.page==='calories') { el.innerHTML=renderCalories(); lucide.createIcons(); initCalorieCharts(); } } catch(err){} }
+    
+       async function handleAddMeal(e) { 
+      e    async function handleAddMeal(e) { 
+      e.preventDefault(); 
+      try {
+        await api('/calories/log','POST',{
+          name: document.getElementById('meal-name').value, 
+          calories: parseInt(document.getElementById('meal-cal').value), 
+          mealType: document.getElementById('meal-type').value
+        }); 
+        showToast('Meal logged!'); 
+        render(); 
+      } catch(err) {
+        console.error('Add meal error:', err);
+      }
+    }
+
+    // ============================================================
+    // WEIGHT
+    // ============================================================
+    function renderWeight() {
+      loadWeightData();
+      const history = state.data.weight?.history || [];
+      const curWeight = history.length ? history[history.length-1].weight : '--';
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Weight Tracker</h1></div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <h3 class="text-lg font-bold text-slate-900 mb-5">Log Weight</h3>
+        <form onsubmit="handleWeightLog(event)" class="grid sm:grid-cols-3 gap-4">
+          <input type="number" id="weight-val" step="0.1" min="20" required placeholder="Weight (kg)" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <input type="date" id="weight-date" value="${new Date().toISOString().split('T')[0]}" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md transition-all">Save</button>
+        </form>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Weight History</h3>
+        <canvas id="weightChart" height="220"></canvas>
+      </div>`;
+    }
+
+    function initWeightChart() {
+      const h = state.data.weight?.history || [];
+      createChart('weightChart', { type:'line', data:{ labels:h.map(w=>new Date(w.date).toLocaleDateString()), datasets:[{ label:'Weight (kg)', data:h.map(w=>w.weight), borderColor:'#059669', backgroundColor:'rgba(5,150,105,0.1)', fill:true, tension:0.4, pointRadius:5, pointBackgroundColor:'#059669', pointBorderColor:'#fff', pointBorderWidth:2 }] }, options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ grid:{color:'#f1f5f9'}, ticks:{font:{family:'Inter',size:11}} }, x:{ grid:{display:false}, ticks:{font:{family:'Inter',size:11}} } } } });
+    }
+
+    async function loadWeightData() { try { const history = await api('/weight/history'); state.data.weight = { history }; const el = document.getElementById('page-content'); if (el && state.page==='weight') { el.innerHTML=renderWeight(); lucide.createIcons(); initWeightChart(); } } catch(err){} }
+    
+    async function handleWeightLog(e) { 
+      e.preventDefault(); 
+      try {
+        await api('/weight/log','POST',{weight:parseFloat(document.getElementById('weight-val').value),date:document.getElementById('weight-date').value}); 
+        showToast('Weight logged!'); loadWeightData(); 
+      } catch(err){} 
+    }
+
+    // ============================================================
+    // EXERCISES
+    // ============================================================
+    function renderExercises() {
+      loadExercises();
+      const list = state.data.exercises?.list || [];
+      const catColors = {Cardio:'bg-red-50 text-red-600',Strength:'bg-blue-50 text-blue-600',Core:'bg-green-50 text-green-600',HIIT:'bg-yellow-50 text-yellow-700',Flexibility:'bg-purple-50 text-purple-600'};
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Exercises</h1><p class="text-slate-500 mt-1">Browse and discover exercises for your routine</p></div>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        ${list.length === 0 ? '<p class="text-slate-400 col-span-3 text-center py-12">Loading exercises...</p>' : list.map(ex => `
+        <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-slate-100 card-hover">
+          <div class="p-5">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="font-bold text-lg text-slate-900">${ex.name}</h3>
+              <span class="px-2.5 py-1 rounded-md text-xs font-semibold ${catColors[ex.category]||'bg-slate-100 text-slate-600'}">${ex.category}</span>
+            </div>
+            <p class="text-sm text-slate-500 mb-4">${ex.description}</p>
+            <div class="flex items-center gap-5 text-xs text-slate-500 font-medium">
+              <span class="flex items-center gap-1"><i data-lucide="clock" class="w-3.5 h-3.5"></i> ${ex.duration} min</span>
+              <span class="flex items-center gap-1"><i data-lucide="flame" class="w-3.5 h-3.5"></i> ${ex.caloriesBurned} cal</span>
+            </div>
+          </div>
+        </div>`).join('')}
+      </div>`;
+    }
+
+    async function loadExercises() { try { const list = await api('/exercises'); state.data.exercises = { list }; const el = document.getElementById('page-content'); if (el && state.page==='exercises') { el.innerHTML=renderExercises(); lucide.createIcons(); } } catch(err){} }
+
+    // ============================================================
+    // WORKOUTS
+    // ============================================================
+    function renderWorkouts() {
+      loadWorkoutData();
+      const list = state.data.workouts?.list || [];
+      const tc = {Cardio:'bg-red-50 text-red-600',Strength:'bg-blue-50 text-blue-600',HIIT:'bg-yellow-50 text-yellow-700',Flexibility:'bg-green-50 text-green-600',Sports:'bg-purple-50 text-purple-600'};
+      const ti = {Cardio:'heart-pulse',Strength:'dumbbell',HIIT:'zap',Flexibility:'stretch-horizontal',Sports:'trophy'};
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Workouts</h1></div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Log Workout</h3>
+        <form onsubmit="handleAddWorkout(event)" class="grid sm:grid-cols-2 gap-3">
+          <input type="text" id="wk-name" placeholder="Workout name" required class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <select id="wk-type" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none bg-white"><option>Cardio</option><option>Strength</option><option>Flexibility</option><option>HIIT</option><option>Sports</option></select>
+          <input type="number" id="wk-dur" placeholder="Duration (min)" required min="1" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <input type="number" id="wk-cal" placeholder="Calories burned" min="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <button type="submit" class="sm:col-span-2 bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md transition-all">+ Log Workout</button>
+        </form>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Workout Duration (Last 7 Days)</h3>
+        <canvas id="workoutBarChart" height="180"></canvas>
+      </div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Workout History</h3>
+        ${list.length === 0 ? '<p class="text-slate-400 text-sm text-center py-8">No workouts logged yet.</p>' : list.map(w => `
+        <div class="flex items-center justify-between py-4 px-4 bg-slate-50 rounded-xl mb-3">
+          <div class="flex items-center gap-4">
+            <div class="w-11 h-11 rounded-xl ${tc[w.type]||'bg-slate-100'} flex items-center justify-center"><i data-lucide="${ti[w.type]||'dumbbell'}" class="w-5 h-5"></i></div>
+            <div>
+              <p class="font-semibold text-slate-900 text-sm">${w.name}</p>
+              <p class="text-xs text-slate-400">${new Date(w.date).toLocaleDateString()} · <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold ${tc[w.type]||''}">${w.type}</span></p>
+            </div>
+          </div>
+          <div class="flex items-center gap-5">
+            <div class="text-center"><p class="text-lg font-bold text-slate-900">${w.duration}</p><p class="text-[10px] text-slate-400">min</p></div>
+            <div class="text-center"><p class="text-lg font-bold text-red-500">${w.calories||0}</p><p class="text-[10px] text-slate-400">kcal</p></div>
+          </div>
+        </div>`).join('')}
+      </div>`;
+    }
+
+    function initWorkoutCharts() {
+      createChart('workoutBarChart', { type:'bar', data:{ labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], datasets:[{ label:'Duration (min)', data:[45,60,0,30,50,0,55], backgroundColor: ctx => ctx.raw === 0 ? '#f1f5f9' : '#059669', borderRadius:6, barThickness:28 }] }, options:{ responsive:true, plugins:{ legend:{ display:false } }, scales:{ y:{ beginAtZero:true, grid:{color:'#f1f5f9'}, ticks:{font:{family:'Inter',size:11}} }, x:{ grid:{display:false}, ticks:{font:{family:'Inter',size:11}} } } } });
+    }
+
+    async function loadWorkoutData() { try { const list = await api('/workouts'); state.data.workouts = { list }; const el = document.getElementById('page-content'); if (el && state.page==='workouts') { el.innerHTML=renderWorkouts(); lucide.createIcons(); initWorkoutCharts(); } } catch(err){} }
+
+    async function handleAddWorkout(e) { 
+      e.preventDefault(); 
+      try {
+        await api('/workouts','POST',{name:document.getElementById('wk-name').value,type:document.getElementById('wk-type').value,duration:parseInt(document.getElementById('wk-dur').value),calories:parseInt(document.getElementById('wk-cal').value)||0}); 
+        showToast('Workout logged!'); loadWorkoutData(); 
+      } catch(err){} 
+    }
+
+    // ============================================================
+    // GOALS
+    // ============================================================
+    function renderGoals() {
+      loadGoalData();
+      const goals = state.data.goals?.list || [];
+      const goalColors = ['#059669','#3b82f6','#eab308','#a855f7','#ef4444','#f97316'];
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Goals</h1><p class="text-slate-500 mt-1">Track your fitness milestones</p></div>
+      <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 mb-6">
+        <h3 class="text-lg font-bold text-slate-900 mb-4">Create New Goal</h3>
+        <form onsubmit="handleAddGoal(event)" class="grid sm:grid-cols-2 gap-3">
+          <input type="text" id="goal-title" placeholder="Goal title" required class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <input type="number" id="goal-target" placeholder="Target value" required min="1" step="0.1" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <input type="text" id="goal-unit" placeholder="Unit (e.g. km, lbs, days)" required class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <input type="number" id="goal-current" placeholder="Current progress" min="0" step="0.1" value="0" class="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+          <button type="submit" class="sm:col-span-2 bg-brand-600 hover:bg-brand-700 text-white py-3 rounded-lg font-semibold shadow-md transition-all">+ Create Goal</button>
+        </form>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-6">
+        ${goals.map((g, i) => {
+          const pct = Math.min(100, Math.round((g.current/g.target)*100));
+          const color = goalColors[i % goalColors.length];
+          const done = pct >= 100;
+          return `
+          <div class="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 card-hover relative ${done?'ring-2 ring-brand-500':''}">
+            ${done ? '<div class="absolute top-4 right-4 px-2.5 py-1 rounded-md text-xs font-bold bg-brand-50 text-brand-700">✓ Complete</div>' : ''}
+            <h3 class="text-lg font-bold text-slate-900 mb-3 pr-20">${g.title}</h3>
+            <div class="flex items-baseline gap-1 mb-3">
+              <span class="text-3xl font-extrabold" style="color:${color}">${g.current}</span>
+              <span class="text-sm text-slate-400">/ ${g.target} ${g.unit}</span>
+            </div>
+            <div class="w-full h-3 bg-slate-100 rounded-full overflow-hidden mb-3"><div class="h-full rounded-full progress-fill" style="width:${pct}%;background:${color}"></div></div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-semibold" style="color:${color}">${pct}%</span>
+              <div class="flex gap-2">
+                ${!done ? `<button onclick="updateGoalProgress('${g._id}', ${g.current}, ${g.target}, 1)" class="px-3 py-1.5 bg-brand-50 text-brand-700 border border-brand-200 rounded-lg text-xs font-bold hover:bg-brand-100 transition-all">+1 ${g.unit}</button>` : ''}
+                <button onclick="deleteGoal('${g._id}')" class="px-3 py-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg text-xs font-bold hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-all">Remove</button>
+              </div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${goals.length === 0 ? '<div class="text-center py-12"><p class="text-slate-400">No goals yet. Create one above to get started!</p></div>' : ''}`;
+    }
+
+    async function loadGoalData() { try { const list = await api('/goals'); state.data.goals = { list }; const el = document.getElementById('page-content'); if (el && state.page==='goals') { el.innerHTML=renderGoals(); lucide.createIcons(); } } catch(err){} }
+
+    async function handleAddGoal(e) { 
+      e.preventDefault(); 
+      try {
+        await api('/goals','POST',{title:document.getElementById('goal-title').value,target:parseFloat(document.getElementById('goal-target').value),unit:document.getElementById('goal-unit').value,current:parseFloat(document.getElementById('goal-current').value)||0}); 
+        showToast('Goal created!'); loadGoalData(); 
+      } catch(err){} 
+    }
+
+    async function updateGoalProgress(id, current, target, amount) {
+      try {
+        const newCurrent = Math.min(target, +(current + amount).toFixed(1));
+        await api(`/goals/${id}`, 'PUT', { current: newCurrent });
+        if (newCurrent >= target) showToast('🎉 Goal completed!');
+        else showToast('Progress updated!');
+        loadGoalData();
+      } catch(err){}
+    }
+
+    async function deleteGoal(id) {
+      try {
+        await api(`/goals/${id}`, 'DELETE');
+        showToast('Goal removed');
+        loadGoalData();
+      } catch(err){}
+    }
+
+    // ============================================================
+    // SUBSCRIPTION
+    // ============================================================
+    function renderSubscription() { 
+      const currentPlan = state.user?.subscription?.plan || 'free';
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Subscription</h1><p class="text-slate-500 mt-1">Choose the plan that fits your goals</p></div>
+      <div class="grid md:grid-cols-3 gap-6 max-w-4xl">
+        <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 card-hover ${currentPlan==='free'?'ring-2 ring-brand-600':''}">
+          <h3 class="text-xl font-bold text-slate-900 mb-2">Free</h3>
+          <p class="text-4xl font-extrabold text-slate-900 mb-6">$0<span class="text-base font-normal text-slate-400">/mo</span></p>
+          <ul class="space-y-3 mb-8 text-sm text-slate-600">
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>Basic calorie tracking</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>Exercise library</li>
+            <li class="flex items-center gap-2"><i data-lucide="x" class="w-4 h-4 text-slate-300"></i><span class="text-slate-400">AI Coach</span></li>
+            <li class="flex items-center gap-2"><i data-lucide="x" class="w-4 h-4 text-slate-300"></i><span class="text-slate-400">Trainer chat</span></li>
+          </ul>
+          <button class="w-full py-3 border-2 border-slate-200 rounded-lg font-semibold text-slate-500">${currentPlan==='free'?'Current Plan':'Downgrade'}</button>
+        </div>
+        <div class="bg-brand-700 rounded-2xl p-8 shadow-xl card-hover text-white ${currentPlan==='pro'?'ring-4 ring-accent-500':''}">
+          <div class="flex items-center gap-2 mb-2"><h3 class="text-xl font-bold">Pro</h3><span class="px-2 py-0.5 bg-accent-500 rounded text-xs font-bold">POPULAR</span></div>
+          <p class="text-4xl font-extrabold mb-6">$9<span class="text-base font-normal text-brand-200">/mo</span></p>
+          <ul class="space-y-3 mb-8 text-sm text-brand-100">
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>Everything in Free</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>AI Smart Coach</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>Trainer chat access</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-300"></i>Advanced analytics</li>
+          </ul>
+          <button onclick="upgradePlan('pro')" class="w-full py-3.5 bg-white text-brand-800 rounded-lg font-bold hover:bg-brand-50 shadow-md transition-all">${currentPlan==='pro'?'Current Plan':'Upgrade Now'}</button>
+        </div>
+        <div class="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 card-hover ${currentPlan==='elite'?'ring-2 ring-brand-600':''}">
+          <h3 class="text-xl font-bold text-slate-900 mb-2">Elite</h3>
+          <p class="text-4xl font-extrabold text-slate-900 mb-6">$19<span class="text-base font-normal text-slate-400">/mo</span></p>
+          <ul class="space-y-3 mb-8 text-sm text-slate-600">
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>Everything in Pro</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>1-on-1 video sessions</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>Custom meal plans</li>
+            <li class="flex items-center gap-2"><i data-lucide="check" class="w-4 h-4 text-brand-500"></i>Priority support</li>
+          </ul>
+          <button onclick="upgradePlan('elite')" class="w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 shadow-md transition-all">${currentPlan==='elite'?'Current Plan':'Go Elite'}</button>
+        </div>
+      </div>`;
+    }
+
+    async function upgradePlan(plan) {
+      try {
+        const data = await api('/subscription/upgrade','POST',{plan}); 
+        state.user = { ...state.user, subscription:{ plan: data.plan } };
+        localStorage.setItem('fh_user', JSON.stringify(state.user));
+        showToast(`Upgraded to ${plan.charAt(0).toUpperCase()+plan.slice(1)} plan! 🎉`);
+        render();
+      } catch(err){}
+    }
+
+    // ============================================================
+    // CHAT
+    // ============================================================
+    function renderChat() {
+      const isTrainer = state.user?.role === 'trainer';
+      const isFreeCustomer = !isTrainer && (state.user?.subscription?.plan === 'free' || !state.user?.subscription?.plan);
+
+      if (isFreeCustomer) {
+        return `
+        <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">Trainer Chat</h1></div>
+        <div class="bg-white rounded-2xl p-12 shadow-sm border border-slate-100 text-center max-w-lg mx-auto mt-16">
+          <div class="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center mx-auto mb-6 border-4 border-purple-100"><i data-lucide="lock" class="w-10 h-10 text-purple-500"></i></div>
+          <h2 class="text-2xl font-bold text-slate-900 mb-3">Premium Feature</h2>
+          <p class="text-slate-500 mb-8">You need a Pro subscription to chat directly with real trainers.</p>
+          <button onclick="navigate('subscription')" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3.5 rounded-lg font-semibold transition-all shadow-md">Upgrade to Pro</button>
+        </div>`;
+      }
+
+      loadChatPartners();
+      const partners = state.data.chatPartners || [];
+      const messages = state.data.chatMessages?.[state.activeChatId] || [];
+
+      return `
+      <div class="mb-8"><h1 class="text-3xl font-bold text-slate-900 tracking-tight">${isTrainer ? 'Client Messages' : 'Trainer Chat'}</h1></div>
+      <div class="grid lg:grid-cols-3 gap-6" style="height:70vh;">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-slate-100 font-bold text-slate-900">${isTrainer?'My Clients':'Select a Trainer'}</div>
+          <div class="flex-1 overflow-y-auto p-3 space-y-2">
+            ${partners.length === 0 ? `<p class="text-sm text-slate-400 p-4">Loading...</p>` : partners.map(p => `
+            <button onclick="openChatWith('${p._id}')" class="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all border ${state.activeChatId===p._id?'bg-brand-50 border-brand-200':'border-transparent'}">
+              <div class="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center border-2 border-white shadow-sm"><span class="text-brand-700 text-sm font-bold">${p.name[0].toUpperCase()}</span></div>
+              <p class="text-sm font-semibold text-slate-900">${p.name}</p>
+            </button>`).join('')}
+          </div>
+        </div>
+        <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+          ${state.activeChatId ? `
+          <div class="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+            <div class="w-10 h-10 bg-brand-600 rounded-full flex items-center justify-center shadow-sm"><span class="text-white font-bold">${(partners.find(p=>p._id===state.activeChatId)?.name||'U')[0].toUpperCase()}</span></div>
+            <p class="font-bold text-slate-900 text-sm">${partners.find(p=>p._id===state.activeChatId)?.name||'User'}</p>
+          </div>
+          <div id="chat-messages" class="flex-1 p-6 space-y-4 overflow-y-auto bg-slate-50/30">
+            ${messages.map(m => `
+            <div class="flex gap-3 ${m.senderId===state.user?.id?'justify-end':''} fade-in">
+              ${m.senderId!==state.user?.id ? `<div class="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center flex-shrink-0"><i data-lucide="user" class="w-4 h-4 text-brand-600"></i></div>` : ''}
+              <div class="${m.senderId===state.user?.id?'bg-brand-600 text-white rounded-xl rounded-tr-none':'bg-white rounded-xl rounded-tl-none border border-slate-100'} p-4 max-w-md shadow-sm"><p class="text-sm">${m.content}</p></div>
+              ${m.senderId===state.user?.id ? `<div class="w-8 h-8 bg-brand-600 rounded-full flex items-center justify-center flex-shrink-0 text-white text-xs font-bold">You</div>` : ''}
+            </div>`).join('')}
+          </div>
+          <form onsubmit="sendMessage(event)" class="p-4 border-t border-slate-100 flex gap-3 bg-white">
+            <input type="text" id="chat-input" placeholder="Type your message..." required class="flex-1 px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-brand-500 outline-none">
+            <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white px-5 rounded-lg font-semibold shadow-md transition-all"><i data-lucide="send" class="w-4 h-4"></i></button>
+          </form>` : `
+          <div class="flex-1 flex items-center justify-center text-slate-400 flex-col gap-3"><i data-lucide="message-circle" class="w-12 h-12 opacity-30"></i><p>Select a person to start chatting</p></div>`}
+        </div>
+      </div>`;
+    }
+
+    async function loadChatPartners() { 
+      try {
+        const isTrainer = state.user?.role === 'trainer'; 
+        const endpoint = isTrainer ? '/trainer/my-clients' : '/trainer/trainers'; 
+        const partners = await api(endpoint); 
+        state.data.chatPartners = partners; 
+        const el = document.getElementById('page-content'); 
+        if (el && (state.page==='trainer' || state.page==='chat')) { el.innerHTML=renderChat(); lucide.createIcons(); } 
+      } catch(err){} 
+    }
+
+    async function openChatWith(userId) { 
+      state.activeChatId = userId; 
+      try {
+        const messages = await api(`/trainer/history/${userId}`); 
+        state.data.chatMessages = state.data.chatMessages || {}; 
+        state.data.chatMessages[userId] = messages; 
+        render();
+        setTimeout(() => { const box = document.getElementById('chat-messages'); if (box) box.scrollTop = box.scrollHeight; }, 100);
+      } catch(err){} 
+    }
+
+    async function sendMessage(e) { 
+      e.preventDefault(); 
+      if (!state.activeChatId) return; 
+      const input = document.getElementById('chat-input'); 
+      const msg = input.value.trim(); 
+      if (!msg) return;
+      try {
+        await api('/trainer/send','POST',{receiverId:state.activeChatId,content:msg}); 
+        // Re-fetch messages
+        const messages = await api(`/trainer/history/${state.activeChatId}`);
+        state.data.chatMessages = state.data.chatMessages || {}; 
+        state.data.chatMessages[state.activeChatId] = messages;
+        render();
+        setTimeout(() => { const box = document.getElementById('chat-messages'); if (box) box.scrollTop = box.scrollHeight; }, 100);
+      } catch(err){}
+    }
+
+    // ============================================================
+    // INIT
+    // ============================================================
+    render();
+  </script>
+</body>
+</html>
