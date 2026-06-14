@@ -1,0 +1,23 @@
+const express = require('express');
+const CalorieLog = require('../models/CalorieLog');
+const { auth } = require('../middleware/auth');
+const router = express.Router();
+
+router.get('/today', auth, async (req, res) => {
+  try {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const meals = await CalorieLog.find({ userId: req.userId, date: { $gte: today } }).sort({ date: -1 });
+    const totalCalories = meals.reduce((s, m) => s + m.calories, 0);
+    res.json({ meals, totalCalories });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+router.post('/log', auth, async (req, res) => {
+  try {
+    const { name, calories, mealType } = req.body;
+    const entry = await CalorieLog.create({ userId: req.userId, name, calories, mealType });
+    res.status(201).json(entry);
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+module.exports = router;
